@@ -1,4 +1,5 @@
 
+import org.jsoup.Connection;
 import org.jsoup.Jsoup;
 import java.io.IOException;
 import java.util.concurrent.*;
@@ -6,42 +7,98 @@ import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
+import static java.lang.Thread.sleep;
+
 
 public class WeatherTry4 {
-    public static void main(String[] args) throws IOException {
 
-        String fileName = "D:\\test.txt";
-        ConcurrentLinkedQueue<Element> linkList = new ConcurrentLinkedQueue<Element>();
-        ScheduledExecutorService executorService = Executors.newScheduledThreadPool(320);
+    private static ConcurrentLinkedQueue<Element> linkList = new ConcurrentLinkedQueue<Element>();
 
+
+     boolean WeatherReadToFileExecutor(String fileName, int countThreads, int timeIntervalMilliseconds){
+
+        ScheduledExecutorService executorService = Executors.newScheduledThreadPool(countThreads);
+
+        int i  = 0;
+
+        if(CreateFile(fileName)&&LoadLinkList(0)) {
+            while (linkList.size() > 0) {
+                i++;
+                executorService.scheduleAtFixedRate((new WeatherWriter(linkList, fileName)), (i/countThreads)*1000, timeIntervalMilliseconds, TimeUnit.MILLISECONDS);
+            }
+            try {
+                executorService.awaitTermination(40,TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+            return true;
+        }else return false;
+
+    }
+
+     boolean WeatherReadToFileForkJoin(String fileName, int countThreads, int timeIntervalMilliseconds){
+
+        ForkJoinPool pool = new ForkJoinPool(countThreads);
+        if(CreateFile(fileName)&&LoadLinkList(0)) {
+            while (linkList.size()>0){
+                for (int j = 0; j < countThreads; j++) {
+
+                    pool.execute((RecursiveAction) (new WeatherWriter(linkList,fileName)));
+                }
+
+                try {
+                    sleep(1000);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+
+            try {
+                pool.awaitTermination(60,TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+            return true;
+        }else return false;
+    }
+
+      private boolean LoadLinkList(int timeout){
+        Document doc = null;
+          Connection.Response response = null;
+          int code = 0;
         try {
-            Singleton.getInstance().deleteAndCreateFile(fileName);
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-        try {
+            while (code!=200) {
+                try {
+                    Connection connection = Jsoup.connect("http://weather.bigmir.net/ukraine/").timeout(timeout);
+                    response = connection.execute();
+                    code = response.statusCode();
+                }catch (Exception e){
 
+                }
+            }
+            doc = response.parse();
 
-            Document doc = Jsoup.connect("http://weather.bigmir.net/ukraine/")
-                    .timeout(0).get();
+            //doc = Jsoup.connect("http://weather.bigmir.net/ukraine/").timeout(timeout).get();
             Elements newsHeadlines = doc.select("div.fl.W_col2");
 
             for (Element headline : newsHeadlines) {
 
                 linkList.addAll(headline.select("li"));
             }
-
-        }catch (Exception ex){
-            System.out.println(ex.getMessage());
-        }finally {
-
-            while (linkList.size()>0) {
-
-                executorService.scheduleAtFixedRate((new WeatherReader(linkList, fileName )),0,1000,TimeUnit.MILLISECONDS);
-            }
-
+            return true;
+        } catch (IOException e) {
+            e.printStackTrace();
         }
+        return false;
+    }
 
-        executorService.shutdown();
+    private boolean CreateFile(String fileName){
+        try {
+            WorkWithFileSingleton.getInstance().deleteAndCreateFile(fileName);
+            return true;
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return false;
     }
 }
